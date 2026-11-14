@@ -1,5 +1,7 @@
 extends Node2D
-# Snake indie - v3: movimiento suave a 60 fps, niveles, TNT, sombras
+# Snake indie - v4: pantalla de titulo con PLAY, fuente propia, niveles, TNT, movimiento suave
+
+enum State { TITLE, PLAYING }
 
 const CELL := 32
 const GRID_W := 25
@@ -11,22 +13,39 @@ const FOOD_COLOR := Color("f9e2af")
 const SHADOW_COLOR := Color(0, 0, 0, 0.35)
 const SHADOW_OFFSET := Vector2(2, 3)
 
+# Tamanos de letra (multiplos de 8 se ven mejor con fuentes pixel como Press Start 2P)
+const HUD_SIZE := 16
+const MID_SIZE := 24
+const BIG_SIZE := 48
+
 # Respaldo: si no hay imagenes de simbolos, se dibujan estos como texto
 const TEXT_SYMBOLS := ["{", "}", "[", "]", "(", ")", "/", "\\", ";", "<", ">", "=", "!", "&", "|", "#"]
 
-# ---- Imagenes: arrastralas desde el Inspector (nodo Main) ----
+# ---- Imagenes y fuente: arrastralas desde el Inspector (nodo Main) ----
 @export var head_texture: Texture2D
 @export var body_texture: Texture2D
 @export var food_textures: Array[Texture2D] = []
 @export var tnt_texture: Texture2D
 
+# Pantalla de titulo y zona donde se hace click para jugar.
+# play_button_area va en proporciones de la imagen (0 a 1): x, y, ancho, alto.
+@export var title_texture: Texture2D
+@export var play_button_area := Rect2(0.428, 0.506, 0.21, 0.083)
+
+# Pantalla de GAME OVER, zona del boton TRY AGAIN (proporciones 0 a 1 de la imagen)
+# y segundos que se ve la escena del choque antes de mostrarla.
+@export var game_over_texture: Texture2D
+@export var try_again_area := Rect2(0.403, 0.540, 0.251, 0.070)
+@export var game_over_delay := 0.8
+
+# Fuente pixel (por ejemplo Press Start 2P). Si queda vacia usa la de Godot.
+@export var game_font: Font
+
 # ---- Cuerpo: que tan junto se ve ----
-# body_fill = bolitas extra entre cada pedazo (0 = como antes, 1 = el doble de juntas, 2 = casi una cadena)
 @export_range(0, 3) var body_fill := 1
-# body_scale = tamano de cada bolita (1.0 = normal, 1.3 = 30% mas grande)
 @export_range(1.0, 2.0, 0.05) var body_scale := 1.0
 
-# Fondos por nivel: casilla 0 = nivel 1, casilla 1 = nivel 2, etc.
+# Fondos por nivel: casilla 0 = nivel 1, casilla 1 = nivel 2, casilla 2 = nivel 3...
 # Si el juego llega a un nivel sin fondo, se queda con el ultimo que tengas.
 @export var level_backgrounds: Array[Texture2D] = []
 @export_range(0.0, 0.8, 0.05) var background_dim := 0.25
@@ -42,6 +61,8 @@ const TEXT_SYMBOLS := ["{", "}", "[", "]", "(", ")", "/", "\\", ";", "<", ">", "
 @export var max_tnt := 25
 
 var fallback_head: Texture2D = preload("res://icon.svg")
+
+var state := State.TITLE
 
 var snake: Array[Vector2i] = []
 var prev_snake: Array[Vector2i] = []   # donde estaba cada pedazo antes del ultimo paso
@@ -60,6 +81,7 @@ var level := 0                         # 0 = nivel 1
 var game_over := false
 var paused := false                    # pausa corta al subir de nivel
 var banner_time := 0.0
+var over_clock := 0.0                  # segundos desde que se perdio
 
 var step_time := 0.3
 var step_clock := 0.0                  # avance dentro del paso actual (para animar suave)
@@ -69,6 +91,21 @@ func _ready() -> void:
 	randomize()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # pixel art nitido
 	_reset()
+	state = State.TITLE
+
+
+func _font() -> Font:
+	return game_font if game_font else ThemeDB.fallback_font
+
+
+func _start_game() -> void:
+	_reset()
+	state = State.PLAYING
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+
+func _go_to_title() -> void:
+	state = State.TITLE
 
 
 func _reset() -> void:
@@ -80,6 +117,8 @@ func _reset() -> void:
 	score = 0
 	level = 0
 	game_over = false
+	over_clock = 0.0
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	paused = false
 	ghost_active = false
 	banner_time = 0.0
@@ -131,9 +170,31 @@ func _level_up() -> void:
 	paused = false
 
 
+# ------------------------------------------------------------------ entrada
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
+	var click := event as InputEventMouseButton
+	var key := event as InputEventKey
+	var is_click := click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT
+	var is_key := key != null and key.pressed and not key.echo
+
+	# --- Pantalla de titulo ---
+	if state == State.TITLE:
+		if is_click and _play_rect().has_point(get_local_mouse_position()):
+			_start_game()
+		elif is_key and (key.keycode == KEY_ENTER or key.keycode == KEY_SPACE):
+			_start_game()
+		return
+
+	# --- Juego ---
+	if is_click:
+		# Boton TRY AGAIN: reinicia y va directo al juego
+		if _can_retry() and _try_again_rect().has_point(get_local_mouse_position()):
+			_reset()
+		return
+
+	if is_key:
+		match key.keycode:
 			KEY_UP, KEY_W:
 				_set_dir(Vector2i.UP)
 			KEY_DOWN, KEY_S:
@@ -143,8 +204,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_RIGHT, KEY_D:
 				_set_dir(Vector2i.RIGHT)
 			KEY_ENTER, KEY_SPACE:
-				if game_over:
+				if _can_retry():
 					_reset()
+			KEY_ESCAPE:
+				_go_to_title()
+
+
+# Se puede reintentar cuando ya se ve la pantalla de game over
+func _can_retry() -> bool:
+	if not game_over:
+		return false
+	return over_clock >= (game_over_delay if game_over_texture else 0.0)
 
 
 func _set_dir(d: Vector2i) -> void:
@@ -152,9 +222,22 @@ func _set_dir(d: Vector2i) -> void:
 		next_dir = d
 
 
+# ------------------------------------------------------------------ logica
+
 func _process(delta: float) -> void:
+	if state == State.TITLE:
+		var over_play := _play_rect().has_point(get_local_mouse_position())
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if over_play else Input.CURSOR_ARROW)
+		queue_redraw()
+		return
+
 	if banner_time > 0.0:
 		banner_time -= delta
+
+	if game_over:
+		over_clock += delta
+		var over_try := _can_retry() and _try_again_rect().has_point(get_local_mouse_position())
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if over_try else Input.CURSOR_ARROW)
 
 	if not game_over:
 		step_clock += delta
@@ -220,9 +303,60 @@ func _draw_with_shadow(tex: Texture2D, rect: Rect2) -> void:
 	draw_texture_rect(tex, rect, false)
 
 
-func _draw_text_outlined(font: Font, pos: Vector2, text: String, align: HorizontalAlignment, width: float, size: int, color: Color) -> void:
-	draw_string_outline(font, pos, text, align, width, size, 5, Color(0, 0, 0, 0.85))
+func _draw_text_outlined(font: Font, pos: Vector2, text: String, align: HorizontalAlignment, width: float, size: int, color: Color, outline: Color = Color(0, 0, 0, 0.85)) -> void:
+	draw_string_outline(font, pos, text, align, width, size, maxi(3, size / 6), outline)
 	draw_string(font, pos, text, align, width, size, color)
+
+
+# Dibuja una imagen cubriendo toda el area SIN deformarla (recorta lo que sobra por los lados)
+func _draw_cover(tex: Texture2D) -> void:
+	var area := Vector2(GRID_W * CELL, GRID_H * CELL)
+	var tex_size := tex.get_size()
+	var s := maxf(area.x / tex_size.x, area.y / tex_size.y)
+	var src_size := area / s
+	var src_pos := (tex_size - src_size) / 2.0
+	draw_texture_rect_region(tex, Rect2(Vector2.ZERO, area), Rect2(src_pos, src_size))
+
+
+# Convierte una zona de la imagen (en proporciones 0-1) a pixeles de pantalla,
+# usando la misma escala y recorte que _draw_cover
+func _image_rect_to_screen(norm: Rect2, tex: Texture2D) -> Rect2:
+	var area := Vector2(GRID_W * CELL, GRID_H * CELL)
+	var tex_size := tex.get_size()
+	var s := maxf(area.x / tex_size.x, area.y / tex_size.y)
+	var src_pos := (tex_size - area / s) / 2.0
+	return Rect2((norm.position * tex_size - src_pos) * s, norm.size * tex_size * s)
+
+
+func _play_rect() -> Rect2:
+	if title_texture:
+		return _image_rect_to_screen(play_button_area, title_texture)
+	var area := Vector2(GRID_W * CELL, GRID_H * CELL)
+	return Rect2(area.x / 2.0 - 100.0, 360.0, 200.0, 56.0)
+
+
+func _try_again_rect() -> Rect2:
+	if game_over_texture:
+		return _image_rect_to_screen(try_again_area, game_over_texture)
+	return Rect2()
+
+
+func _draw_game_over_screen() -> void:
+	var font := _font()
+	var rect := _try_again_rect()
+	var width := float(GRID_W * CELL)
+	var dark := Color("0b4ba8")
+	var soft_white := Color(1, 1, 1, 0.9)
+
+	_draw_cover(game_over_texture)
+	if rect.has_point(get_local_mouse_position()):
+		draw_rect(rect, soft_white, false, 3.0)
+
+	# Puntaje final debajo del boton
+	_draw_text_outlined(font, Vector2(0, 430), "PUNTOS: %d" % score,
+		HORIZONTAL_ALIGNMENT_CENTER, width, MID_SIZE, dark, soft_white)
+	_draw_text_outlined(font, Vector2(0, 472), "NIVEL: %d" % (level + 1),
+		HORIZONTAL_ALIGNMENT_CENTER, width, HUD_SIZE, dark, soft_white)
 
 
 func _draw_background() -> void:
@@ -230,13 +364,7 @@ func _draw_background() -> void:
 	var idx := mini(level, level_backgrounds.size() - 1)
 
 	if idx >= 0 and level_backgrounds[idx] != null:
-		var tex := level_backgrounds[idx]
-		var tex_size := tex.get_size()
-		# Cubre toda el area SIN deformar la imagen (recorta lo que sobra)
-		var s := maxf(area.x / tex_size.x, area.y / tex_size.y)
-		var src_size := area / s
-		var src_pos := (tex_size - src_size) / 2.0
-		draw_texture_rect_region(tex, Rect2(Vector2.ZERO, area), Rect2(src_pos, src_size))
+		_draw_cover(level_backgrounds[idx])
 		if background_dim > 0.0:
 			draw_rect(Rect2(Vector2.ZERO, area), Color(0, 0, 0, background_dim))
 	else:
@@ -251,12 +379,36 @@ func _draw_food(pos: Vector2i, index: int) -> void:
 		if index >= 0 and index < food_textures.size() and food_textures[index] != null:
 			_draw_with_shadow(food_textures[index], rect)
 	elif index >= 0 and index < TEXT_SYMBOLS.size():
-		_draw_text_outlined(ThemeDB.fallback_font, Vector2(rect.position.x, rect.position.y + CELL * 0.8),
+		_draw_text_outlined(_font(), Vector2(rect.position.x, rect.position.y + CELL * 0.8),
 			TEXT_SYMBOLS[index], HORIZONTAL_ALIGNMENT_CENTER, CELL, 30, FOOD_COLOR)
 
 
+func _draw_title() -> void:
+	var area := Vector2(GRID_W * CELL, GRID_H * CELL)
+	var font := _font()
+	var play := _play_rect()
+	var hover := play.has_point(get_local_mouse_position())
+
+	if title_texture:
+		_draw_cover(title_texture)
+		if hover:
+			draw_rect(play, Color(1, 1, 1, 0.9), false, 3.0)
+	else:
+		# Titulo de respaldo hasta que pongan la imagen
+		draw_rect(Rect2(Vector2.ZERO, area), BG_COLOR)
+		_draw_text_outlined(font, Vector2(0, 190), "¡REBOOT!", HORIZONTAL_ALIGNMENT_CENTER, area.x, MID_SIZE, BODY_COLOR)
+		_draw_text_outlined(font, Vector2(0, 270), "GODOT", HORIZONTAL_ALIGNMENT_CENTER, area.x, BIG_SIZE, Color.WHITE)
+		draw_rect(play, Color("7fc4ff") if hover else BODY_COLOR)
+		_draw_text_outlined(font, Vector2(play.position.x, play.position.y + play.size.y * 0.68),
+			"PLAY", HORIZONTAL_ALIGNMENT_CENTER, play.size.x, MID_SIZE, Color.WHITE)
+
+
 func _draw() -> void:
-	var font := ThemeDB.fallback_font
+	if state == State.TITLE:
+		_draw_title()
+		return
+
+	var font := _font()
 	var t := clampf(step_clock / step_time, 0.0, 1.0)
 
 	_draw_background()
@@ -298,17 +450,25 @@ func _draw() -> void:
 	_draw_with_shadow(head_tex, Rect2(_seg_pixel(0, t), Vector2(CELL, CELL)))
 
 	# Puntaje y nivel
-	_draw_text_outlined(font, Vector2(8, 22), "Puntos: %d" % score,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
-	_draw_text_outlined(font, Vector2(0, 22), "Nivel: %d" % (level + 1),
-		HORIZONTAL_ALIGNMENT_RIGHT, GRID_W * CELL - 8, 20, Color.WHITE)
+	_draw_text_outlined(font, Vector2(8, 24), "PUNTOS: %d" % score,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_SIZE, Color.WHITE)
+	_draw_text_outlined(font, Vector2(0, 24), "NIVEL: %d" % (level + 1),
+		HORIZONTAL_ALIGNMENT_RIGHT, GRID_W * CELL - 8, HUD_SIZE, Color.WHITE)
 
 	# Cartel de nivel nuevo
 	if banner_time > 0.0:
-		_draw_text_outlined(font, Vector2(0, GRID_H * CELL / 2.0 - 30), "¡NIVEL %d!" % (level + 1),
-			HORIZONTAL_ALIGNMENT_CENTER, GRID_W * CELL, 56, FOOD_COLOR)
+		_draw_text_outlined(font, Vector2(0, GRID_H * CELL / 2.0), "¡NIVEL %d!" % (level + 1),
+			HORIZONTAL_ALIGNMENT_CENTER, GRID_W * CELL, BIG_SIZE, FOOD_COLOR)
 
 	# Game over
 	if game_over:
-		_draw_text_outlined(font, Vector2(0, GRID_H * CELL / 2.0), "GAME OVER - Enter para reiniciar",
-			HORIZONTAL_ALIGNMENT_CENTER, GRID_W * CELL, 28, Color("f38ba8"))
+		if game_over_texture:
+			# Primero se ve el choque un momento, luego la pantalla de game over
+			if over_clock >= game_over_delay:
+				_draw_game_over_screen()
+		else:
+			# Respaldo hasta que pongan la imagen
+			_draw_text_outlined(font, Vector2(0, GRID_H * CELL / 2.0 - 10), "GAME OVER",
+				HORIZONTAL_ALIGNMENT_CENTER, GRID_W * CELL, BIG_SIZE, Color("f38ba8"))
+			_draw_text_outlined(font, Vector2(0, GRID_H * CELL / 2.0 + 36), "ENTER: reiniciar    ESC: menu",
+				HORIZONTAL_ALIGNMENT_CENTER, GRID_W * CELL, HUD_SIZE, Color.WHITE)
