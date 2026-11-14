@@ -3,12 +3,18 @@
 [ext_resource type="Script" uid="uid://doi3uh65n0iln" path="res://scripts/snake.gd" id="1_ig7tw"]
 [ext_resource type="Texture2D" uid="uid://bfh42giir3kq5" path="res://sprite/Sprite-0003.png" id="2_h2yge"]
 [ext_resource type="Texture2D" uid="uid://cjotidac0thoi" path="res://sprite/sprite fondos/nivel1.jpeg" id="3_1bvp3"]
+[ext_resource type="Texture2D" uid="uid://doymlboamb2lp" path="res://sprite/Sprite-0012.png" id="3_4c57u"]
 [ext_resource type="Texture2D" uid="uid://k33c7u3qc2yq" path="res://sprite/sprite simbolos/flechitas.png" id="3_7mycd"]
 [ext_resource type="Texture2D" uid="uid://dtndt02imces1" path="res://sprite/sprite simbolos/puntoycoma.png" id="4_272bh"]
 [ext_resource type="Texture2D" uid="uid://d3eg8qmwlimya" path="res://sprite/sprite simbolos/signo igual.png" id="5_5vw27"]
+[ext_resource type="Texture2D" uid="uid://bf5gk87152bgb" path="res://sprite/obstaculos/tnt.png" id="6_5vw27"]
+[ext_resource type="Texture2D" uid="uid://bk5jx2m28ecff" path="res://sprite/sprite simbolos/Sprite-00010.png" id="7_efxa6"]
+[ext_resource type="Texture2D" uid="uid://cw1o7x8xmjsb3" path="res://sprite/sprite fondos/nivel2.jpg" id="8_kek77"]
 
 [node name="Main" type="Node2D" unique_id=2022894816]
 script = ExtResource("1_ig7tw")
 head_texture = ExtResource("2_h2yge")
-food_textures = Array[Texture2D]([ExtResource("3_7mycd"), ExtResource("4_272bh"), ExtResource("5_5vw27")])
-level_backgrounds = Array[Texture2D]([ExtResource("3_1bvp3")])
+body_texture = ExtResource("3_4c57u")
+food_textures = Array[Texture2D]([ExtResource("3_7mycd"), ExtResource("4_272bh"), ExtResource("5_5vw27"), ExtResource("7_efxa6")])
+tnt_texture = ExtResource("6_5vw27")
+level_backgrounds = Array[Texture2D]([ExtResource("3_1bvp3"), ExtResource("8_kek77")])
