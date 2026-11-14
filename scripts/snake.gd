@@ -41,6 +41,12 @@ const TEXT_SYMBOLS := ["{", "}", "[", "]", "(", ")", "/", "\\", ";", "<", ">", "
 # Fuente pixel (por ejemplo Press Start 2P). Si queda vacia usa la de Godot.
 @export var game_font: Font
 
+# ---- Musica (recomendado .ogg; tambien sirve .mp3 o .wav) ----
+@export var title_music: AudioStream
+@export var level_music: Array[AudioStream] = []   # casilla 0 = nivel 1, casilla 1 = nivel 2...
+@export var game_over_music: AudioStream
+@export_range(-40.0, 0.0, 1.0) var music_volume_db := -6.0
+
 # ---- Cuerpo: que tan junto se ve ----
 @export_range(0, 3) var body_fill := 1
 @export_range(1.0, 2.0, 0.05) var body_scale := 1.0
@@ -52,8 +58,8 @@ const TEXT_SYMBOLS := ["{", "}", "[", "]", "(", ")", "/", "\\", ";", "<", ">", "
 
 # ---- Velocidad: segundos por paso (mas alto = mas lento) ----
 @export var start_step_time := 0.30
-@export var min_step_time := 0.12
-@export var speed_up_per_food := 0.005
+@export var min_step_time := 0.10
+@export var speed_up_per_food := 0.007
 
 # ---- Niveles y dificultad ----
 @export_range(1, 100) var points_per_level := 10   # puntos para pasar de nivel
@@ -63,6 +69,7 @@ const TEXT_SYMBOLS := ["{", "}", "[", "]", "(", ")", "/", "\\", ";", "<", ">", "
 var fallback_head: Texture2D = preload("res://icon.svg")
 
 var state := State.TITLE
+var music_player: AudioStreamPlayer
 
 var snake: Array[Vector2i] = []
 var prev_snake: Array[Vector2i] = []   # donde estaba cada pedazo antes del ultimo paso
@@ -90,8 +97,12 @@ var step_clock := 0.0                  # avance dentro del paso actual (para ani
 func _ready() -> void:
 	randomize()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # pixel art nitido
+	music_player = AudioStreamPlayer.new()
+	music_player.volume_db = music_volume_db
+	add_child(music_player)
 	_reset()
 	state = State.TITLE
+	_play_music(title_music)
 
 
 func _font() -> Font:
@@ -99,13 +110,33 @@ func _font() -> Font:
 
 
 func _start_game() -> void:
-	_reset()
 	state = State.PLAYING
+	_reset()
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 
 func _go_to_title() -> void:
 	state = State.TITLE
+	_play_music(title_music)
+
+
+# Musica del nivel actual (si no hay para este nivel, se queda con la ultima que tengas)
+func _music_for_level() -> AudioStream:
+	var idx := mini(level, level_music.size() - 1)
+	return level_music[idx] if idx >= 0 else null
+
+
+func _play_music(stream: AudioStream, loop: bool = true) -> void:
+	if stream == null:
+		music_player.stop()
+		music_player.stream = null
+		return
+	# Si ya esta sonando esa misma musica, no la reinicia
+	if music_player.stream == stream and music_player.playing:
+		return
+	stream.set("loop", loop)   # .ogg y .mp3 tienen la propiedad loop
+	music_player.stream = stream
+	music_player.play()
 
 
 func _reset() -> void:
@@ -126,6 +157,8 @@ func _reset() -> void:
 	step_clock = 0.0
 	food_index = -1
 	_spawn_food()
+	if state == State.PLAYING:
+		_play_music(_music_for_level())
 
 
 func _food_variants() -> int:
@@ -163,6 +196,7 @@ func _spawn_obstacles() -> void:
 
 func _level_up() -> void:
 	level += 1
+	_play_music(_music_for_level())
 	_spawn_obstacles()
 	banner_time = 1.5
 	paused = true
@@ -177,6 +211,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	var is_click := click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT
 	var is_key := key != null and key.pressed and not key.echo
+
+	# M = silenciar / activar el sonido
+	if is_key and key.keycode == KEY_M:
+		AudioServer.set_bus_mute(0, not AudioServer.is_bus_mute(0))
+		return
 
 	# --- Pantalla de titulo ---
 	if state == State.TITLE:
@@ -261,6 +300,7 @@ func _step() -> void:
 			or snake.has(new_head) or obstacles.has(new_head):
 		game_over = true
 		step_clock = step_time
+		_play_music(game_over_music, false)
 		return
 
 	prev_snake.assign(snake)
